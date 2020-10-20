@@ -11,16 +11,29 @@
 
 typedef double val_t;
 
-int assembler_ctor(Assembler *assembler, Text *text)
+int assembler_ctor(Assembler *assembler, Text *text, const char *input_file_name, const char *output_file_name)
 {
     assert(assembler != NULL);
 
-    assembler->listing = fopen("listing.txt", "w");
+    char *listing_file_name = (char *) calloc(strlen(input_file_name) + strlen("lst") - strlen("asm") + 1, sizeof(char));
+
+    if (output_file_name == NULL) {
+        ERROR_OCCURRED_CALLING(calloc, "returned NULL");
+        return 1;
+    }
+
+    strcpy(listing_file_name, input_file_name);
+    strcpy(strchr(listing_file_name, '.') + 1, "lst");
+
+    assembler->listing = fopen(listing_file_name, "w");
+    FREE(listing_file_name);
 
     if (assembler->listing == NULL) {
         ERROR_OCCURRED_CALLING(fopen, "returned NULL");
         return 1;
     }
+
+    fprintf(assembler->listing, "%s -> %s\n\n", input_file_name, output_file_name);
 
     assembler->assembly = (char *) calloc(text->n_lines * (sizeof(char) + sizeof(char) + sizeof(double)), sizeof(char));
 
@@ -49,7 +62,7 @@ void assembler_dtor(Assembler *assembler)
     }
 }
 
-int assembler_tokenize_line(Line *line, char **cmd, char **args)
+int tokenize_line(Line *line, char **cmd, char **args)
 {
     assert(line != NULL);
     assert(cmd != NULL);
@@ -74,7 +87,7 @@ bool is_instruction_mode(char *mode) {
     return (strlen(mode) == 1) && (*mode >= '0') && (*mode <= '1');
 }
 
-int assembler_parse_args(char *args, unsigned n_args, char *mode, char **val)
+int parse_args(char *args, unsigned n_args, push_mode *mode, char **val)
 {
     assert(args != NULL);
     assert(val != NULL);
@@ -102,7 +115,7 @@ int assembler_parse_args(char *args, unsigned n_args, char *mode, char **val)
                 return 1;
             }
 
-            *mode = *str_mode - '0';
+            *mode = (push_mode) (*str_mode - '0');
 
             *val = strtok(NULL, " ");
 
@@ -142,17 +155,19 @@ int assembler_translate_value(Assembler *assembler, const char *str_val)
     }
 
     *((val_t *) assembler->translator) = val;
+    fprintf(assembler->listing, "%s", str_val);
 
     assembler->translator += sizeof(val_t);
 
     return 0;
 }
 
-void assembler_translate_mode(Assembler *assembler, char mode)
+void assembler_translate_mode(Assembler *assembler, push_mode mode)
 {
     assert(assembler != NULL);
 
     *assembler->translator = mode;
+    fprintf(assembler->listing, "%c ", '0' + mode);
 
     assembler->translator += sizeof(char);
 }
@@ -176,6 +191,7 @@ void assembler_translate_register(Assembler *assembler, char register_number)
     assert(assembler != NULL);
 
     *assembler->translator = register_number;
+    fprintf(assembler->listing, "%c%c", 'r', '0' + register_number);
 
     assembler->translator += sizeof(char);
 }
@@ -185,10 +201,10 @@ int assembler_translate_text(Assembler *assembler)
     assert(assembler != NULL);
 
     for (size_t i = 0; i < assembler->n_lines; ++i) {
-        char *cmd;
-        char *args;
+        char *cmd = NULL;
+        char *args = NULL;
 
-        if (assembler_tokenize_line(assembler->lines + i, &cmd, &args)) {
+        if (tokenize_line(assembler->lines + i, &cmd, &args)) {
             ERROR_OCCURRED_CALLING(assembler_tokenize_line, "returned non-zero value");
             return 1;
         }
@@ -197,33 +213,55 @@ int assembler_translate_text(Assembler *assembler)
             continue;
         }
 
+        fprintf(assembler->listing, "%05d ", assembler->translator - assembler->assembly);
+
         if (strcmp(cmd, "hlt") == 0) {
+            fprintf(assembler->listing, "%d ", HLT);
             assembler_translate_command(assembler, HLT);
+            fprintf(assembler->listing, "%s", cmd);
         } else if (strcmp(cmd, "dump") == 0) {
+            fprintf(assembler->listing, "%d ", DUMP);
             assembler_translate_command(assembler, DUMP);
+            fprintf(assembler->listing, "%s", cmd);
         } else if (strcmp(cmd, "in") == 0) {
+            fprintf(assembler->listing, "%d ", IN);
             assembler_translate_command(assembler, IN);
+            fprintf(assembler->listing, "%s", cmd);
         } else if (strcmp(cmd, "out") == 0) {
+            fprintf(assembler->listing, "%d ", OUT);
             assembler_translate_command(assembler, OUT);
+            fprintf(assembler->listing, "%s", cmd);
         } else if (strcmp(cmd, "push") == 0) {
+            fprintf(assembler->listing, "%d ", PUSH);
+
             if (args == NULL) {
                 ERROR_OCCURRED_IN_FUNC(assembler_translate_text, "push instruction without mode and value");
                 return 1;
             }
 
-            char mode = 0;
+            push_mode mode = VAL;
             char *val = NULL;
 
-            if (assembler_parse_args(args, 2, &mode, &val)) {
+            if (parse_args(args, 2, &mode, &val)) {
                 ERROR_OCCURRED_CALLING(assembler_parse_arguments, "returned nonzero value");
                 return 1;
             }
 
+            fprintf(assembler->listing, "%c ", '0' + mode);
+
+            if (is_register(val)) {
+                fprintf(assembler->listing, "%c ", val[1]);
+            } else {
+                fprintf(assembler->listing, "%s ", val);
+            }
+
             assembler_translate_command(assembler, PUSH);
+            fprintf(assembler->listing, "%s ", cmd);
+
             assembler_translate_mode(assembler, mode);
 
             switch (mode) {
-                case 0: {
+                case VAL: {
                     if (assembler_translate_value(assembler, val)) {
                         ERROR_OCCURRED_CALLING(assembler_translate_value, "returned nonzero value");
                         return 1;
@@ -231,7 +269,7 @@ int assembler_translate_text(Assembler *assembler)
 
                     break;
                 }
-                case 1: {
+                case REG: {
                     if (!is_register(val)) {
                         ERROR_OCCURRED_IN_FUNC(assembler_translate_text, "push with invalid register value");
                         return 1;
@@ -246,6 +284,8 @@ int assembler_translate_text(Assembler *assembler)
                 }
             }
         }  else if (strcmp(cmd, "pop") == 0) {
+            fprintf(assembler->listing, "%d ", POP);
+
             if (args == NULL) {
                 ERROR_OCCURRED_IN_FUNC(translate, "pop without register value");
                 return 1;
@@ -253,7 +293,7 @@ int assembler_translate_text(Assembler *assembler)
 
             char *val = NULL;
 
-            if (assembler_parse_args(args, 1, NULL, &val)) {
+            if (parse_args(args, 1, NULL, &val)) {
                 ERROR_OCCURRED_CALLING(assembler_parse_arguments, "returned nonzero value");
                 return 1;
             }
@@ -263,27 +303,42 @@ int assembler_translate_text(Assembler *assembler)
                 return 1;
             }
 
+            fprintf(assembler->listing, "%s ", val);
+
             assembler_translate_command(assembler, POP);
+            fprintf(assembler->listing, "%s ", cmd);
+
             assembler_translate_register(assembler, register_number(val));
         } else if (strcmp(cmd, "neg") == 0) {
+            fprintf(assembler->listing, "%d ", NEG);
             assembler_translate_command(assembler, NEG);
+            fprintf(assembler->listing, "%s", cmd);
         }  else if (strcmp(cmd, "add") == 0) {
+            fprintf(assembler->listing, "%d ", ADD);
             assembler_translate_command(assembler, ADD);
+            fprintf(assembler->listing, "%s", cmd);
         } else if (strcmp(cmd, "sub") == 0) {
+            fprintf(assembler->listing, "%d ", SUB);
             assembler_translate_command(assembler, SUB);
+            fprintf(assembler->listing, "%s", cmd);
         }  else if (strcmp(cmd, "mul") == 0) {
+            fprintf(assembler->listing, "%d ", MUL);
             assembler_translate_command(assembler, MUL);
+            fprintf(assembler->listing, "%s", cmd);
         } else if (strcmp(cmd, "div") == 0) {
+            fprintf(assembler->listing, "%d ", DIV);
             assembler_translate_command(assembler, DIV);
+            fprintf(assembler->listing, "%s", cmd);
         } else if (strcmp(cmd, "pow") == 0) {
+            fprintf(assembler->listing, "%d ", POW);
             assembler_translate_command(assembler, POW);
+            fprintf(assembler->listing, "%s", cmd);
         } else {
-            //TODO make ERROR_OCCURRED_IN_FUNC a vararg macro
-            int size = snprintf(NULL, 0, "invalid command \"%s\"", cmd);
-            char *msg = (char *) calloc(size, sizeof(*msg));
-            ERROR_OCCURRED_IN_FUNC(translate_text, msg);
+            ERROR_OCCURRED_IN_FUNC(assembler_translate_text, "invalid command");
             return 1;
         }
+
+        fprintf(assembler->listing, "\n");
     }
 
     return 0;
