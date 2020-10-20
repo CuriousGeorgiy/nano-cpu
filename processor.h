@@ -7,7 +7,6 @@ struct Processor {
     Stack *stack;
     char *assembly;
     size_t assembly_size;
-
     double r[4];
 };
 
@@ -24,6 +23,11 @@ enum command {
     MUL,
     DIV,
     POW
+};
+
+enum push_mode {
+    VAL,
+    REG
 };
 
 int processor_ctor(Processor *processor, char *assembly, size_t assembly_size);
