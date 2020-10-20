@@ -35,23 +35,20 @@ int processor_execute_assembly(Processor *processor)
     assert(processor != NULL);
     assert(processor->assembly != NULL);
 
-    char *rip = processor->assembly;
+    char *rip = processor->assembly - sizeof(char);
 
     while (rip - processor->assembly < processor->assembly_size) {
+        rip += sizeof(char);
         switch (*rip) {
             case HLT: {
                 return 0;
             }
             case DUMP: {
-                rip += sizeof(char);
-
                 stack_print(processor->stack);
 
                 break;
             }
             case IN: {
-                rip += sizeof(char);
-
                 val_t val = 0;
                 scanf("%lf", &val);
 
@@ -60,8 +57,6 @@ int processor_execute_assembly(Processor *processor)
                 break;
             }
             case OUT: {
-                rip += sizeof(char);
-
                 bool error = false;
                 val_t val = stack_pop(&processor->stack, &error);
 
@@ -75,14 +70,12 @@ int processor_execute_assembly(Processor *processor)
                 break;
             }
             case PUSH: {
-                rip += sizeof(char);
-
-                char mode = *rip;
+                push_mode mode = (push_mode) *rip;
 
                 rip += sizeof(char);
 
                 switch (mode) {
-                    case 0: {
+                    case VAL: {
                         val_t val = *(val_t *) rip;
                         stack_push(&processor->stack, val);
 
@@ -90,7 +83,7 @@ int processor_execute_assembly(Processor *processor)
 
                         break;
                     }
-                    case 1: {
+                    case REG: {
                         char register_number = *rip;
                         stack_push(&processor->stack, processor->r[register_number]);
 
@@ -98,13 +91,15 @@ int processor_execute_assembly(Processor *processor)
 
                         break;
                     }
+                    default: {
+                        ERROR_OCCURRED_IN_FUNC(processor_execute_assembly, "invalid mode");
+                        return 1;
+                    }
                 }
 
                 break;
             }
             case POP: {
-                rip += sizeof(char);
-
                 bool error = false;
                 val_t val = stack_pop(&processor->stack, &error);
 
@@ -114,7 +109,6 @@ int processor_execute_assembly(Processor *processor)
                 }
 
                 char register_number = *rip;
-
                 rip += sizeof(char);
 
                 processor->r[register_number] = val;
@@ -122,10 +116,7 @@ int processor_execute_assembly(Processor *processor)
                 break;
             }
             case NEG: {
-                rip += sizeof(char);
-
                 bool error = false;
-
                 val_t val = stack_pop(&processor->stack, &error);
 
                 if (error) {
@@ -138,8 +129,6 @@ int processor_execute_assembly(Processor *processor)
                 break;
             }
             case ADD: {
-                rip += sizeof(char);
-
                 bool error = false;
 
                 val_t val1 = stack_pop(&processor->stack, &error);
@@ -161,8 +150,6 @@ int processor_execute_assembly(Processor *processor)
                 break;
             }
             case SUB: {
-                rip += sizeof(char);
-
                 bool error = false;
                 val_t subtrahend = stack_pop(&processor->stack, &error);
 
@@ -183,10 +170,7 @@ int processor_execute_assembly(Processor *processor)
                 break;
             }
             case MUL: {
-                rip += sizeof(char);
-
                 bool error = false;
-
                 val_t val1 = stack_pop(&processor->stack, &error);
 
                 if (error) {
@@ -206,10 +190,7 @@ int processor_execute_assembly(Processor *processor)
                 break;
             }
             case DIV: {
-                rip += sizeof(char);
-
                 bool error = false;
-
                 val_t divisor = stack_pop(&processor->stack, &error);
 
                 if (error) {
@@ -234,10 +215,7 @@ int processor_execute_assembly(Processor *processor)
                 break;
             }
             case POW: {
-                rip += sizeof(char);
-
                 bool error = false;
-
                 val_t power = stack_pop(&processor->stack, &error);
 
                 if (error) {
