@@ -2,9 +2,9 @@
 
 #include "error.h"
 
-#include <assert.h>
+#include <cassert>
 
-long file_size(FILE *file)
+long countFileSize(std::FILE *file)
 {
     assert(file != NULL);
 

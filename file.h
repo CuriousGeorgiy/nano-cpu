@@ -1,8 +1,8 @@
 #ifndef FILE_H
 #define FILE_H
 
-#include <stdio.h>
+#include <cstdio>
 
-long file_size(FILE *file);
+long countFileSize(std::FILE *file);
 
 #endif /* FILE_H */
