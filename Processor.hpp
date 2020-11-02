@@ -6,7 +6,7 @@
 
 class Processor {
 public:
-    Processor(const char *assembly, size_t assemblySize);
+    explicit Processor(const char *inputFileName);
 
     Processor(const Processor &) = delete;
     Processor(Processor &&) = delete;
@@ -14,16 +14,17 @@ public:
     Processor &operator=(const Processor &) = delete;
     Processor &operator=(Processor &&) = delete;
 
-    ~Processor() = default;
+    ~Processor();
 
     void operator()();
 private:
     Stack<constant_t> dataStack;
     Stack<ptrdiff_t> callStack;
-    const char *assembly;
+    char *assembly;
     const char *rip;
-    const size_t assemblySize;
-    double registers[7];
+    size_t assemblySize;
+    constant_t registers[7];
+    constant_t ram[2500];
 };
 
 #endif /* PROCESSOR_HPP */

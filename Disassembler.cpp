@@ -1,27 +1,28 @@
 #include "Disassembler.hpp"
 
-#include "error.h"
-#include "ReadWrite.hpp"
-#include "Stack.hpp"
+#include "File.hpp"
 
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
 
-Disassembler::Disassembler(const char *inputFileName, const char *assembly, size_t assemblySize)
-: assembly(assembly), rip(assembly), assemblySize(assemblySize)
+Disassembler::Disassembler(const char *inputFileName)
 {
     assert(inputFileName != nullptr);
-    assert(assembly != nullptr);
 
-    char *outputFileName = (char *) std::calloc(strlen(inputFileName) + std::strlen("_disassembly") +
-                                                std::strlen("asm") - std::strlen("meow") + 1, sizeof(char));
+    FILE *inputFile = std::fopen(inputFileName, "rb");
+    assembly = readBinaryFileToBuf(inputFile);
+    assemblySize = *(size_t *)(assembly + sizeof(short) + sizeof(char));
+    assembly += sizeof(short) + sizeof(char) + sizeof(size_t);
+    rip = assembly;
 
+    auto outputFileName = new char[strlen(inputFileName) + std::strlen("_disassembly") +
+                                   std::strlen("asm") - std::strlen("meow") + 1];
     std::strcpy(outputFileName, inputFileName);
     std::strcpy(strchr(outputFileName, '.'), "_disassembly.asm");
+    disassemblyFile = std::fopen(outputFileName, "w");
 
-    disassembly = std::fopen(outputFileName, "w");
-    std::free(outputFileName);
+    delete[] outputFileName;
 }
 
 void Disassembler::operator()()
@@ -42,56 +43,89 @@ void Disassembler::operator()()
     }
 }
 
+Disassembler::~Disassembler()
+{
+    std::fclose(disassemblyFile);
+    delete[] (assembly - sizeof(short) - sizeof(char) - sizeof(size_t));
+}
+
 void Disassembler::disassembleInstruction(const char *name, bool noArg)
 {
     assert(name != nullptr);
 
+    std::fprintf(disassemblyFile, "%s ", name);
+
     if (noArg) {
-        fprintf(disassembly, "%s\n", name);
+        disassembleNoArgInstruction();
         return;
     }
 
-    fprintf(disassembly, "%s ", name);
-
-    if (isJumpInstruction(name) || (strcmp(name, "call") == 0)) {
-        auto address = *(ptrdiff_t *) rip;
-        rip += sizeof(ptrdiff_t);
-        fprintf(disassembly, "%lld\n", address);
+    if (isJumpInstruction(name)) {
+        disassembleJumpInstructionArg();
         return;
     }
 
-    auto readWriteMode = (ReadWriteMode) *rip;
-    rip += sizeof(char);
+    disassembleReadWriteInstructionArgs();
+}
 
-    switch (readWriteMode) {
-        case Constant: {
-            auto val = *(constant_t *) rip;
-            rip += sizeof(constant_t);
-            fprintf(disassembly, "%lg\n", val);
-            break;
-        }
-        case Register: {
-            char regCode = *rip;
-            rip += sizeof(char);
-            fprintf(disassembly, "r%cx\n", registerCodeToLetter(regCode));
-            break;
-        }
-    }
+void Disassembler::disassembleJumpInstructionArg()
+{
+    auto address = *(ptrdiff_t *) rip;
+    rip += sizeof(ptrdiff_t);
+    std::fprintf(disassemblyFile, "%lld\n", address);
 }
 
 bool Disassembler::isJumpInstruction(const char *cmdName)
 {
-    return (strcmp(cmdName, "jmp") == 0) || (strcmp(cmdName, "ja") == 0) || (strcmp(cmdName, "jae") == 0) ||
-           (strcmp(cmdName, "jb") == 0) || (strcmp(cmdName, "jbe") == 0) || (strcmp(cmdName, "je") == 0) ||
-           (strcmp(cmdName, "jne") == 0);
+    assert(cmdName != nullptr);
+
+    return (std::strcmp(cmdName, "jmp") == 0) || (std::strcmp(cmdName, "ja") == 0) || (std::strcmp(cmdName, "jae") == 0) ||
+           (std::strcmp(cmdName, "jb") == 0) || (std::strcmp(cmdName, "jbe") == 0) || (std::strcmp(cmdName, "je") == 0) ||
+           (std::strcmp(cmdName, "jne") == 0) || (std::strcmp(cmdName, "call") == 0);
 }
 
-char Disassembler::registerCodeToLetter(char regCode)
+char Disassembler::regCodeToChar(char regCode)
 {
-    return regCode + 'a';
+    return (regCode >= 0 && regCode <= 3) ? (regCode + 'a') : (regCode - 4 + '0');
 }
 
-Disassembler::~Disassembler()
+void Disassembler::disassembleNoArgInstruction()
 {
-    std::fclose(disassembly);
+    std::fprintf(disassemblyFile, "\n");
+}
+
+void Disassembler::disassembleReadWriteInstructionArgs()
+{
+    ReadWriteMode readWriteMode = {};
+    readWriteMode.mode = *rip;
+    rip += sizeof(char);
+
+    if (readWriteMode.ram) {
+        std::fprintf(disassemblyFile, "[");
+        disassembleReadWriteInstructionValueArg(readWriteMode);
+        std::fprintf(disassemblyFile, "]\n");
+        return;
+    }
+
+    disassembleReadWriteInstructionValueArg(readWriteMode);
+    std::fprintf(disassemblyFile, "\n");
+}
+
+void Disassembler::disassembleReadWriteInstructionValueArg(ReadWriteMode readWriteMode)
+{
+    if (readWriteMode.reg & readWriteMode.constant) {
+        auto regCode = *rip;
+        rip += sizeof(char);
+        auto offset = *(constant_t *) rip;
+        rip += sizeof(constant_t);
+        std::fprintf(disassemblyFile, "r%cx+%lg", regCodeToChar(regCode), offset);
+    } else if (readWriteMode.reg & !readWriteMode.constant) {
+        auto regCode = *rip;
+        rip += sizeof(char);
+        std::fprintf(disassemblyFile, "r%cx", regCodeToChar(regCode));
+    } else if (readWriteMode.constant & !readWriteMode.reg) {
+        auto offset = *(constant_t *) rip;
+        rip += sizeof(constant_t);
+        std::fprintf(disassemblyFile, "%lg", offset);
+    }
 }

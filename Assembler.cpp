@@ -1,34 +1,28 @@
 #include "Assembler.hpp"
 
-#include "error.h"
-#include "ReadWrite.hpp"
-#include "memory_alloc.h"
-
+#include <algorithm>
 #include <cassert>
 #include <cctype>
-#include <cmath>
 #include <cstdlib>
 #include <cstring>
 
 Assembler::Assembler(const Text *text, const char *inputFileName, const char *outputFileName)
-: nLines(text->nLines), labels((Label *) std::calloc(text->nLines, sizeof(Label))), nLabels(0), lines(text->lines),
-  assembly((char *) calloc(nLines * (sizeof(char) + sizeof(char) + sizeof(double) + sizeof(ptrdiff_t)), sizeof(char))),
+: nLines(text->nLines), labels(new Label[text->nLines]), nLabels(0), lines(text->lines),
+  assembly(new char[nLines * std::max(sizeof(char) + sizeof(char) + sizeof(char) + sizeof(constant_t), sizeof(ptrdiff_t))]),
   translator(assembly), outputFileName(outputFileName)
 {
-    auto listingFileName = (char *) std::calloc(strlen(inputFileName) + strlen("lst") - strlen("asm") + 1, sizeof(char));
-
+    auto listingFileName = new char[strlen(inputFileName) + strlen("lst") - strlen("asm") + 1];
     std::strcpy(listingFileName, inputFileName);
     std::strcpy(strchr(listingFileName, '.') + 1, "lst");
 
-    listing = std::fopen(listingFileName, "w");
-    std::free(listingFileName);
+    listingFile = std::fopen(listingFileName, "w");
+    delete[] listingFileName;
 
-    fprintf(listing, "%s -> %s\n\n", inputFileName, outputFileName);
+    std::fprintf(listingFile, "%s -> %s\n\n", inputFileName, outputFileName);
 }
-
 Assembler::~Assembler()
 {
-    std::fclose(listing);
+    std::fclose(listingFile);
     std::free(assembly);
 
     for (size_t i = 0; i < nLabels; ++i) {
@@ -40,74 +34,12 @@ Assembler::~Assembler()
 
 void Assembler::operator()()
 {
-    for (size_t i = 0; i < nLines; ++i) {
-        char *label = nullptr;
-        char *cmdName = nullptr;
-        char *cmdArg = nullptr;
+    pass(1);
 
-        Text::Line line = {nullptr, lines[i].len};
-        line.str = (char *) std::calloc(lines[i].len, sizeof(char));
-        std::strcpy(line.str, lines[i].str);
-
-        tokenizeLine(&line, &label, &cmdName, &cmdArg);
-
-        if (label != nullptr) {
-            labels[nLabels].name = (char *) std::calloc(strlen(label), sizeof(char));
-            std::strncpy(labels[nLabels].name, label, strlen(label) - 1);
-            labels[nLabels].address = translator - assembly;
-            ++nLabels;
-        }
-
-        if (cmdName == nullptr) {
-            continue;
-        }
-
-        fprintf(listing, "%03lld ", translator - assembly);
-
-#define DEFINE_COMMAND(name, code, noArg, processorSrc)         \
-{                                                               \
-        if (strcmp(cmdName, #name) == 0) {                      \
-            translateInstruction(cmdName, code, cmdArg, noArg); \
-            continue;                                           \
-        }                                                       \
-}
-#include "Commands.hpp"
-#undef DEFINE_COMMAND
-
-        std::free(line.str);
-    }
-
-    fprintf(listing, "\n");
+    std::fprintf(listingFile, "\n");
     translator = assembly;
-    for (size_t i = 0; i < nLines; ++i) {
-        char *label = nullptr;
-        char *cmdName = nullptr;
-        char *cmdArg = nullptr;
 
-        Text::Line line = {nullptr, lines[i].len};
-        line.str = (char *) std::calloc(lines[i].len, sizeof(char));
-        std::strcpy(line.str, lines[i].str);
-
-        tokenizeLine(&line, &label, &cmdName, &cmdArg);
-
-        if (cmdName == nullptr) {
-            continue;
-        }
-
-        fprintf(listing, "%03lld ", translator - assembly);
-
-#define DEFINE_COMMAND(name, code, noArg, processorSrc)         \
-{                                                               \
-        if (strcmp(cmdName, #name) == 0) {                      \
-            translateInstruction(cmdName, code, cmdArg, noArg); \
-            continue;                                           \
-        }                                                       \
-}
-#include "Commands.hpp"
-#undef DEFINE_COMMAND
-
-        std::free(line.str);
-    }
+    pass(2);
 
     writeAssembly();
 }
@@ -135,67 +67,23 @@ void Assembler::tokenizeLine(const Text::Line *line, char **label, char **cmd, c
 
 bool Assembler::isJumpInstruction(const char *cmdName)
 {
-    return (strcmp(cmdName, "jmp") == 0) || (strcmp(cmdName, "ja") == 0) || (strcmp(cmdName, "jae") == 0) ||
-           (strcmp(cmdName, "jb") == 0) || (strcmp(cmdName, "jbe") == 0) || (strcmp(cmdName, "je") == 0) ||
-           (strcmp(cmdName, "jne") == 0);
+    return (std::strcmp(cmdName, "jmp") == 0) || (std::strcmp(cmdName, "ja") == 0) || (std::strcmp(cmdName, "jae") == 0) ||
+           (std::strcmp(cmdName, "jb") == 0) || (std::strcmp(cmdName, "jbe") == 0) || (std::strcmp(cmdName, "je") == 0) ||
+           (std::strcmp(cmdName, "jne") == 0) || (std::strcmp(cmdName, "call") == 0);
 }
 
-void Assembler::translateInstruction(const char *cmdName, char cmdCode, const char *cmdArg, bool noArg)
+void Assembler::translateInstruction(const char *cmdName, char cmdCode, char *cmdArg, bool noArg)
 {
     assert(cmdName != nullptr);
 
     if (noArg) {
-        fprintf(listing, "%2d%s", cmdCode, "     ");
-        fprintf(listing, "%s\n", cmdName);
-        translateCommand(cmdCode);
+        translateNoArgInstruction(cmdName, cmdCode);
         return;
     }
 
     assert(cmdArg != nullptr);
 
-    fprintf(listing, "%d ", cmdCode);
-    translateCommand(cmdCode);
-
-    if (isJumpInstruction(cmdName) || (strcmp(cmdName, "call") == 0)) {
-        if (cmdArg[0] != ':') {
-            ptrdiff_t jmpAddress = std::atoi(cmdArg);
-            fprintf(listing, "%lld ", jmpAddress);
-            translateAddress(jmpAddress);
-            fprintf(listing, "%s %s\n", cmdName, cmdArg);
-            return;
-        }
-
-        for (size_t i = 0; i < nLabels; ++i) {
-            if (strcmp(labels[i].name, (cmdArg + 1)) == 0) {
-                fprintf(listing, "%lld ", labels[i].address);
-                translateAddress(labels[i].address);
-                fprintf(listing, "%s %s\n", cmdName, cmdArg);
-                return;
-            }
-        }
-
-        fprintf(listing, "%lld %s %s\n", -1ll, cmdName, cmdArg);
-        translator += sizeof(ptrdiff_t);
-        return;
-    }
-
-    if (isRegister(cmdArg)) {
-        char regCode = registerStringToCode(cmdArg);
-
-        fprintf(listing, "%c ", '0' + Register);
-        fprintf(listing, "%c ", '0' + regCode);
-
-        translateReadWriteMode(Register);
-        translateRegister(regCode);
-    } else {
-        fprintf(listing, "%c ", '0' + Constant);
-        fprintf(listing, "%s ", cmdArg);
-
-        translateReadWriteMode(Constant);
-        translateConstant(cmdArg);
-    }
-
-    fprintf(listing, "%s %s\n", cmdName, cmdArg);
+    translateArgInstruction(cmdName, cmdCode, cmdArg);
 }
 
 void Assembler::translateAddress(ptrdiff_t address)
@@ -204,13 +92,13 @@ void Assembler::translateAddress(ptrdiff_t address)
     translator += sizeof(ptrdiff_t);
 }
 
-void Assembler::translateCommand(char cmd)
+void Assembler::translateCmd(char cmd)
 {
     *translator = cmd;
     translator += sizeof(char);
 }
 
-void Assembler::translateConstant(const char *arg)
+void Assembler::translateConst(const char *arg)
 {
     assert(arg != nullptr);
 
@@ -220,19 +108,18 @@ void Assembler::translateConstant(const char *arg)
 
 void Assembler::translateReadWriteMode(ReadWriteMode readWriteMode)
 {
-    *translator = (char) readWriteMode;
+    *translator = readWriteMode.mode;
     translator += sizeof(char);
 }
 
-bool Assembler::isRegister(const char *arg)
+bool Assembler::isReg(const char *arg)
 {
     assert(arg != nullptr);
 
-    return (strlen(arg) == 3) && (arg[0] == 'r') && ((arg[1] >= 'a') && (arg[1] <= 'd') || (arg[1] >= '0') && (arg[1] <= '2')) &&
-           (arg[2] == 'x');
+    return (arg[0] == 'r') && ((arg[1] >= 'a') && (arg[1] <= 'd') || (arg[1] >= '0') && (arg[1] <= '2')) && (arg[2] == 'x');
 }
 
-char Assembler::registerStringToCode(const char *regStr)
+char Assembler::regStrToCode(const char *regStr)
 {
     assert(regStr != nullptr);
 
@@ -243,7 +130,7 @@ char Assembler::registerStringToCode(const char *regStr)
     return regStr[1] - '0' + 4;
 }
 
-void Assembler::translateRegister(char reg)
+void Assembler::translateReg(char reg)
 {
     *translator = reg;
     translator += sizeof(char);
@@ -254,7 +141,7 @@ void Assembler::writeAssembly()
     FILE *output = std::fopen(outputFileName, "wb");
 
     size_t headerSize = sizeof(short) + sizeof(char) + sizeof(size_t);
-    auto header = (char *) std::calloc(headerSize, sizeof(char));
+    auto header =  new char[headerSize];
     char *headerWriter = header;
 
     *((short *) headerWriter) = 'G' + 256 * 'L';
@@ -266,10 +153,198 @@ void Assembler::writeAssembly()
     size_t assemblySize = translator - assembly;
     *((size_t *) headerWriter) = assemblySize;
 
-    fwrite(header, sizeof(char), headerSize, output);
-    std::free(header);
+    fwrite(header, sizeof(*header), headerSize, output);
+    delete[] header;
 
-    fwrite(assembly, sizeof(char), assemblySize, output);
+    fwrite(assembly, sizeof(*assembly), assemblySize, output);
 
     fclose(output);
+}
+
+bool Assembler::isRam(const char *arg)
+{
+    return (arg[0] == '[') && (arg[strlen(arg) - 1] == ']');
+}
+
+bool Assembler::isRegOffset(const char *arg)
+{
+    return std::strchr(arg, '+') != nullptr;
+}
+
+void Assembler::translateNoArgInstruction(const char *cmdName, char cmdCode)
+{
+    assert(cmdName);
+
+    std::fprintf(listingFile, "0x%08X %s\n", cmdCode, cmdName);
+    translateCmd(cmdCode);
+}
+
+void Assembler::translateArgInstruction(const char *cmdName, char cmdCode, char *cmdArg)
+{
+    std::fprintf(listingFile, "0x%08X ", cmdCode);
+    translateCmd(cmdCode);
+
+    if (isJumpInstruction(cmdName)) {
+        translateJumpInstructionArg(cmdName, cmdArg);
+        return;
+    }
+
+    translateReadWriteInstructionArg(cmdName, cmdArg);
+}
+
+void Assembler::translateJumpInstructionArg(const char *cmdName, const char *cmdArg)
+{
+    if (cmdArg[0] != ':') {
+        translateJumpInstructionAddress(cmdName, cmdArg);
+        return;
+    }
+
+    cmdArg += 1;
+
+    translateJumpInstructionLabel(cmdName, cmdArg);
+}
+
+void Assembler::translateReadWriteInstructionArg(const char *cmdName, char *cmdArg)
+{
+    ReadWriteMode readWriteMode = {};
+
+    if (isRam(cmdArg)) {
+        readWriteMode.ram = 1;
+        cmdArg += 1;
+        cmdArg[strlen(cmdArg) - 1] = '\0';
+    }
+
+    if (isReg(cmdArg)) {
+        translateReadWriteInstructionReg(cmdArg, readWriteMode);
+    } else {
+        translateReadWriteInstructionConst(cmdArg, readWriteMode);
+    }
+
+    if (readWriteMode.ram) {
+        std::fprintf(listingFile, "%s [%s]\n", cmdName, cmdArg);
+    } else {
+        std::fprintf(listingFile, "%s %s\n", cmdName, cmdArg);
+    }
+}
+
+void Assembler::translateReadWriteInstructionReg(char *cmdArg, ReadWriteMode readWriteMode)
+{
+    char regCode = regStrToCode(cmdArg);
+    readWriteMode.reg = 1;
+
+    if (isRegOffset(cmdArg)) {
+        translateReadWriteInstructionRegWithOffset(cmdArg, readWriteMode, regCode);
+        return;
+    }
+
+    std::fprintf(listingFile, "0x%08X 0x%08X ", '0' + readWriteMode.mode, '0' + regCode);
+
+    translateReadWriteMode(readWriteMode);
+    translateReg(regCode);
+}
+
+void Assembler::translateReadWriteInstructionConst(const char *cmdArg, ReadWriteMode readWriteMode)
+{
+    readWriteMode.constant = 1;
+    std::fprintf(listingFile, "0x%08X 0x%08llX ", '0' + readWriteMode.mode, (unsigned long long) std::atof(cmdArg));
+
+    translateReadWriteMode(readWriteMode);
+    translateConst(cmdArg);
+}
+
+void Assembler::translateReadWriteInstructionRegWithOffset(char *cmdArg, ReadWriteMode readWriteMode, char regCode)
+{
+    readWriteMode.constant = 1;
+
+    char *plus = std::strchr(cmdArg, '+');
+    *plus = '\0';
+    char *constant = plus + 1;
+
+    std::fprintf(listingFile, "0x%08X 0x%08X 0x%08llX ", '0' + readWriteMode.mode, '0' + regCode, (unsigned long long) std::atof(constant));
+
+    translateReadWriteMode(readWriteMode);
+    translateReg(regCode);
+    translateConst(constant);
+}
+
+bool Assembler::translateLabel(const char *cmdName, const char *label)
+{
+    for (size_t i = 0; i < nLabels; ++i) {
+        if (std::strcmp(labels[i].name, label) == 0) {
+            std::fprintf(listingFile, "0x%08tX %s %s\n", labels[i].address, cmdName, label);
+            translateAddress(labels[i].address);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void Assembler::translateDummyLabel(const char *cmdName, const char *label)
+{
+    std::fprintf(listingFile, "%lld %s %s\n", -1ll, cmdName, label);
+    translator += sizeof(ptrdiff_t);
+}
+
+void Assembler::translateJumpInstructionAddress(const char *cmdName, const char *cmdArg)
+{
+    ptrdiff_t jmpAddress = std::atoi(cmdArg);
+    std::fprintf(listingFile, "0x%08tX %s %s\n", jmpAddress, cmdName, cmdArg);
+    translateAddress(jmpAddress);
+}
+
+void Assembler::translateJumpInstructionLabel(const char *cmdName, const char *label)
+{
+    if (!translateLabel(cmdName, label)) {
+        translateDummyLabel(cmdName, label);
+    }
+}
+
+void Assembler::pass(unsigned passNo)
+{
+    std::fprintf(listingFile, "Pass %u:\n", passNo);
+
+    for (size_t i = 0; i < nLines; ++i) {
+        char *label = nullptr;
+        char *cmdName = nullptr;
+        char *cmdArg = nullptr;
+
+        Text::Line line = {nullptr, lines[i].len};
+        line.str = new char[lines[i].len];
+        std::strcpy(line.str, lines[i].str);
+
+        tokenizeLine(&line, &label, &cmdName, &cmdArg);
+
+        if (passNo == 1) {
+            if (label != nullptr) {
+                addLabel(label);
+            }
+        }
+
+        if (cmdName == nullptr) {
+            continue;
+        }
+
+        std::fprintf(listingFile, "%03lld ", translator - assembly);
+
+#define DEFINE_COMMAND(name, code, noArg, processorSrc)             \
+        {                                                           \
+            if (std::strcmp(cmdName, #name) == 0) {                      \
+                translateInstruction(cmdName, code, cmdArg, noArg); \
+                continue;                                           \
+            }                                                       \
+        }
+#include "Commands.hpp"
+#undef DEFINE_COMMAND
+
+        delete[] line.str;
+    }
+}
+
+void Assembler::addLabel(const char *label)
+{
+    labels[nLabels].name = (char *) std::calloc(strlen(label), sizeof(char));
+    std::strncpy(labels[nLabels].name, label, strlen(label) - 1);
+    labels[nLabels].address = translator - assembly;
+    ++nLabels;
 }

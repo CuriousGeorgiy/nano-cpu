@@ -1,5 +1,4 @@
 #include "Assembler.hpp"
-#include "error.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -9,7 +8,7 @@ int main(int argc, const char *argv[])
     --argc;
 
     if (argc == 0 || argc > 1) {
-        printf("Specify input file\n");
+        printf("usage: assembler <source_code_file_name>\n");
         return EXIT_SUCCESS;
     }
 
@@ -17,16 +16,15 @@ int main(int argc, const char *argv[])
 
     Text text(inputFileName);
 
-    auto outputFileName = (char *) calloc(strlen(inputFileName) + strlen("meow") - strlen("asm") + 1, sizeof(char));
-
+    auto outputFileName = new char[strlen(inputFileName) + strlen("meow") - strlen("asm") + 1];
     strcpy(outputFileName, inputFileName);
     strcpy(strchr(outputFileName, '.') + 1, "meow");
 
     Assembler assembler(&text, inputFileName, outputFileName);
     assembler();
 
-    printf("Successfully assembled %s into %s\n", inputFileName, outputFileName);
-    std::free(outputFileName);
+    printf("Successfully assembled %s into %s.\n", inputFileName, outputFileName);
+    delete[] outputFileName;
 
     return EXIT_SUCCESS;
 }

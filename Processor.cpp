@@ -1,13 +1,21 @@
 #include "Processor.hpp"
 
+#include "File.hpp"
 #include "ReadWrite.hpp"
 
 #include <cassert>
+#include <cstdio>
 
-Processor::Processor(const char *assembly, size_t assemblySize)
-: dataStack(), callStack(), assembly(assembly), rip(assembly), assemblySize(assemblySize), registers{0, 0, 0}
+Processor::Processor(const char *inputFileName)
+: dataStack(10), callStack(), registers{}, ram{}
 {
-    assert(assembly != nullptr);
+    assert(inputFileName != nullptr);
+
+    FILE *inputFile = std::fopen(inputFileName, "rb");
+    assembly = readBinaryFileToBuf(inputFile);
+    assemblySize = *(size_t *)(assembly + sizeof(short) + sizeof(char));
+    assembly += sizeof(short) + sizeof(char) + sizeof(size_t);
+    rip = assembly;
 }
 
 void Processor::operator()()
@@ -18,9 +26,7 @@ void Processor::operator()()
         case code: {                                    \
             rip += sizeof(char);                        \
                                                         \
-            {                                           \
-                processorSrc                            \
-            }                                           \
+            processorSrc                                \
                                                         \
             break;                                      \
         }
@@ -28,4 +34,9 @@ void Processor::operator()()
 #undef DEFINE_COMMAND
         }
     }
+}
+
+Processor::~Processor()
+{
+    delete[] (assembly - sizeof(short) - sizeof(char) - sizeof(size_t));
 }

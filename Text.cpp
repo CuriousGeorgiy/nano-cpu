@@ -1,49 +1,48 @@
 #include "Text.hpp"
 
-#include "error.h"
-
 #include <cassert>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <Windows.h>
 
 Text::Text(const char *inputFileName)
-: buffer(nullptr), lines(nullptr), inputFileName(inputFileName), nLines(0)
+: buf(nullptr), lines(nullptr), inputFileName(inputFileName), nLines(0)
 {
     assert(inputFileName != nullptr);
 
-    readTextFileToBuffer();
-    countLinesInBuffer();
-    parseBuffer();
+    readTextFileToBuf();
+    countLinesInBuf();
+    splitBufIntoLines();
 }
 
 Text::~Text()
 {
     std::free(lines);
-    std::free(buffer);
+    std::free(buf);
 }
 
-void Text::readTextFileToBuffer()
+void Text::readTextFileToBuf()
 {
     HANDLE inputFileHandle = CreateFileA(inputFileName, GENERIC_READ, 0, NULL, OPEN_EXISTING, NULL, NULL);
     DWORD inputFileSize = GetFileSize(inputFileHandle, NULL);
     HANDLE inputFileMappingHandle = CreateFileMappingA(inputFileHandle, NULL, PAGE_READONLY, 0, 0, NULL);
     LPVOID inputFileMapView = MapViewOfFile(inputFileMappingHandle, FILE_MAP_READ, 0, 0, 0);
 
-    buffer = (char *) std::calloc(inputFileSize + 2, sizeof(char));
-    std::memcpy(buffer + 1, inputFileMapView, inputFileSize);
+    buf = (char *) std::calloc(inputFileSize + 2, sizeof(char));
+    std::memcpy(buf + 1, inputFileMapView, inputFileSize);
 
     UnmapViewOfFile(inputFileMapView);
     CloseHandle(inputFileMappingHandle);
     CloseHandle(inputFileHandle);
 }
 
-void Text::countLinesInBuffer()
+void Text::countLinesInBuf()
 {
     int prePreChar = EOF;
     int preChar = EOF;
 
-    const char *reader = buffer + 1;
+    const char *reader = buf + 1;
 
     while (*reader) {
         if ((*reader == '\n') && (preChar == '\r') && (prePreChar != '\n') && (prePreChar != EOF)) ++nLines;
@@ -55,11 +54,11 @@ void Text::countLinesInBuffer()
     if ((preChar != '\n') && (preChar != EOF) && (prePreChar != '\r')) ++nLines;
 }
 
-void Text::parseBuffer()
+void Text::splitBufIntoLines()
 {
     lines = (Line *) std::calloc(nLines + 1, sizeof(Text::Line));
 
-    lines[0].str = std::strtok(buffer + 1, "\r\n");
+    lines[0].str = std::strtok(buf + 1, "\r\n");
 
     lines[0].str[-1] = '\0';
     lines[0].len = strlen(lines[0].str);

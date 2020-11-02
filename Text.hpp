@@ -11,7 +11,7 @@ public:
     Line *lines;
     size_t nLines;
 
-    Text(const char *inputFileName);
+    explicit Text(const char *inputFileName);
 
     Text(const Text &) = delete;
     Text(Text &&) = delete;
@@ -21,12 +21,12 @@ public:
 
     ~Text();
 private:
-    char *buffer;
+    char *buf;
     const char *inputFileName;
 
-    void readTextFileToBuffer();
-    void countLinesInBuffer();
-    void parseBuffer();
+    void readTextFileToBuf();
+    void countLinesInBuf();
+    void splitBufIntoLines();
 };
 
 #endif /* TEXT_HPP */

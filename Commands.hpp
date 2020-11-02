@@ -32,7 +32,7 @@
 
 #define ZERO_DIVISION_ERROR() TERMINATE()
 
-#define WRITE_TO_REGISTER(constant) \
+#define WRITE_VALUE_TO_REGISTER(constant) \
 do {                        \
     char regCode = *rip;          \
     rip += sizeof(char);            \
@@ -42,17 +42,21 @@ do {                        \
 
 #define TERMINATE() return
 
-#define SCAN(constant) scanf("%lg", &(constant))
+#define SCAN(constant) std::scanf("%lg", &(constant))
 
-#define PRINT(constant) printf("%lg\n", (constant))
+#define PRINT(constant) std::printf("%lg\n", (constant))
 
-#define READ_READ_WRITE_MODE() \
-[this]()              \
-{                     \
-    auto mode = (ReadWriteMode) *this->rip;\
-    this->rip += sizeof(char);                                                           \
-    return mode;                                                                                \
-}()
+#define READ_READ_WRITE_MODE()        \
+    ReadWriteMode readWriteMode = {}; \
+    readWriteMode.mode = *rip;        \
+    rip += sizeof(char)               \
+
+#define READ_WRITE_MODE_RAM readWriteMode.ram
+#define READ_WRITE_MODE_REGISTER readWriteMode.reg
+#define READ_WRITE_MODE_CONSTANT readWriteMode.constant
+
+#define WRITE_VALUE_TO_RAM(address, value) ram[(address)] = (value)
+#define READ_FROM_RAM(index) ram[(index)]
 
 #define READ_CONSTANT() \
 [this]()   \
@@ -62,12 +66,28 @@ do {                        \
     return constant;            \
 }()
 
-#define READ_REGISTER() \
+#define READ_OFFSET() \
+[this]()   \
+{            \
+    auto offset = *(constant_t *) this->rip;\
+    this->rip += sizeof(constant_t);      \
+    return (size_t) offset;            \
+}()
+
+#define READ_INDEX_FROM_REGISTER() \
 [this]()  \
 {            \
-    char reg_code = *this->rip;\
+    char regCode = *this->rip;\
     this->rip += sizeof(char); \
-    return this->registers[reg_code];            \
+    return (size_t) this->registers[regCode];            \
+}()
+
+#define READ_VALUE_FROM_REGISTER() \
+[this]()  \
+{            \
+    char regCode = *this->rip;\
+    this->rip += sizeof(char); \
+    return this->registers[regCode];            \
 }()
 
 #define READ_ADDRESS() \
@@ -86,6 +106,11 @@ do {                        \
 
 DEFINE_COMMAND(hlt, 0, true,
 {
+    for (size_t i = 0; i < 50; ++i) {
+        for (size_t j = 0; j < 50; ++j) putchar((char) ram[i * 50 + j]);
+        putchar('\n');
+    }
+
     TERMINATE();
 })
 
@@ -109,25 +134,59 @@ DEFINE_COMMAND(out, 3, true,
 
 DEFINE_COMMAND(push, 4, false,
 {
-    ReadWriteMode readWriteMode = READ_READ_WRITE_MODE();
+    READ_READ_WRITE_MODE();
 
-    switch (readWriteMode) {
-        case Constant: {
-            DATA_STACK_PUSH(READ_CONSTANT());
-            break;
+    if (READ_WRITE_MODE_RAM) {
+        if (READ_WRITE_MODE_REGISTER & READ_WRITE_MODE_CONSTANT) {
+            auto index = READ_INDEX_FROM_REGISTER();
+            auto offset = READ_OFFSET();
+            DATA_STACK_PUSH(READ_FROM_RAM(index + offset));
+        } else if (READ_WRITE_MODE_REGISTER & !READ_WRITE_MODE_CONSTANT) {
+            auto index = READ_INDEX_FROM_REGISTER();
+            DATA_STACK_PUSH(READ_FROM_RAM(index));
+        } else if (READ_WRITE_MODE_CONSTANT & !READ_WRITE_MODE_REGISTER) {
+            auto offset = READ_OFFSET();
+            DATA_STACK_PUSH(READ_FROM_RAM(offset));
         }
-        case Register: {
-            DATA_STACK_PUSH(READ_REGISTER());
-            break;
-        }
+
+        continue;
+    }
+
+    if (READ_WRITE_MODE_REGISTER & READ_WRITE_MODE_CONSTANT) {
+        auto val = READ_VALUE_FROM_REGISTER();
+        auto constant = READ_CONSTANT();
+        DATA_STACK_PUSH(val + constant);
+    } else if (READ_WRITE_MODE_REGISTER & !READ_WRITE_MODE_CONSTANT) {
+        auto val = READ_VALUE_FROM_REGISTER();
+        DATA_STACK_PUSH(val);
+    } else if (READ_WRITE_MODE_CONSTANT & !READ_WRITE_MODE_REGISTER) {
+        auto constant = READ_CONSTANT();
+        DATA_STACK_PUSH(constant);
     }
 })
 
 DEFINE_COMMAND(pop, 5, false,
 {
-    ReadWriteMode readWriteMode = READ_READ_WRITE_MODE();
+    READ_READ_WRITE_MODE();
     auto constant = DATA_STACK_POP();
-    WRITE_TO_REGISTER(constant);
+
+    if (READ_WRITE_MODE_RAM) {
+        if (READ_WRITE_MODE_REGISTER & READ_WRITE_MODE_CONSTANT) {
+            auto index = READ_INDEX_FROM_REGISTER();
+            auto offset = READ_OFFSET();
+            WRITE_VALUE_TO_RAM(index + offset, constant);
+        } else if (READ_WRITE_MODE_REGISTER & !READ_WRITE_MODE_CONSTANT) {
+            auto index = READ_INDEX_FROM_REGISTER();
+            WRITE_VALUE_TO_RAM(index, constant);
+        } else if (READ_WRITE_MODE_CONSTANT & !READ_WRITE_MODE_REGISTER) {
+            auto offset = READ_OFFSET();
+            WRITE_VALUE_TO_RAM(offset, constant);
+        }
+
+        continue;
+    }
+
+    WRITE_VALUE_TO_REGISTER(constant);
 })
 
 DEFINE_COMMAND(neg, 6, true,
@@ -184,30 +243,8 @@ DEFINE_COMMAND(jmp, 12, false,
 
 DEFINE_COMMAND(ja, 13, false,
 {
-    auto constant1 = DATA_STACK_POP();
     auto constant2 = DATA_STACK_POP();
-    auto address = READ_ADDRESS();
-
-    if (constant1 < constant2) {
-        SET_ADDRESS(address);
-    }
-})
-
-DEFINE_COMMAND(jae, 14, false,
-{
     auto constant1 = DATA_STACK_POP();
-    auto constant2 = DATA_STACK_POP();
-    auto address = READ_ADDRESS();
-
-    if (constant1 <= constant2) {
-        SET_ADDRESS(address);
-    }
-})
-
-DEFINE_COMMAND(jb, 15, false,
-{
-    auto constant1 = DATA_STACK_POP();
-    auto constant2 = DATA_STACK_POP();
     auto address = READ_ADDRESS();
 
     if (constant1 > constant2) {
@@ -215,10 +252,10 @@ DEFINE_COMMAND(jb, 15, false,
     }
 })
 
-DEFINE_COMMAND(jbe, 16, false,
+DEFINE_COMMAND(jae, 14, false,
 {
-    auto constant1 = DATA_STACK_POP();
     auto constant2 = DATA_STACK_POP();
+    auto constant1 = DATA_STACK_POP();
     auto address = READ_ADDRESS();
 
     if (constant1 >= constant2) {
@@ -226,10 +263,32 @@ DEFINE_COMMAND(jbe, 16, false,
     }
 })
 
+DEFINE_COMMAND(jb, 15, false,
+{
+    auto constant2 = DATA_STACK_POP();
+    auto constant1 = DATA_STACK_POP();
+    auto address = READ_ADDRESS();
+
+    if (constant1 < constant2) {
+        SET_ADDRESS(address);
+    }
+})
+
+DEFINE_COMMAND(jbe, 16, false,
+{
+    auto constant2 = DATA_STACK_POP();
+    auto constant1 = DATA_STACK_POP();
+    auto address = READ_ADDRESS();
+
+    if (constant1 <= constant2) {
+        SET_ADDRESS(address);
+    }
+})
+
 DEFINE_COMMAND(je, 17, false,
 {
-    auto constant1 = DATA_STACK_POP();
     auto constant2 = DATA_STACK_POP();
+    auto constant1 = DATA_STACK_POP();
     auto address = READ_ADDRESS();
 
     if (constant1 == constant2) {
@@ -239,8 +298,8 @@ DEFINE_COMMAND(je, 17, false,
 
 DEFINE_COMMAND(jne, 18, false,
 {
-    auto constant1 = DATA_STACK_POP();
     auto constant2 = DATA_STACK_POP();
+    auto constant1 = DATA_STACK_POP();
     auto address = READ_ADDRESS();
 
     if (constant1 != constant2) {
