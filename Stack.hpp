@@ -9,9 +9,9 @@
 #include <cstring>
 
 #ifndef NDEBUG
-#define VERIFY_STACK validate()
+#define VALIDATE_STACK validate()
 #else
-#define VERIFY_STACK
+#define VALIDATE_STACK
 #endif
 
 enum StackErrorCode {
@@ -90,7 +90,7 @@ Stack<T>::Stack(size_t constructionCapacity)
 
     evalHashSum();
 
-    VERIFY_STACK;
+    VALIDATE_STACK;
 }
 
 template<typename T>
@@ -287,7 +287,7 @@ void Stack<T>::transaction(StackTransactionStatus status) {
 
 template<typename T>
 void Stack<T>::grow(double growCoefficient) {
-    VERIFY_STACK;
+    VALIDATE_STACK;
     assert(isfinite(growCoefficient));
     assert((growCoefficient == growCoefficientDefault) || (growCoefficient == growCoefficientIfFailure) ||
            (growCoefficient == 1));
@@ -299,18 +299,18 @@ void Stack<T>::grow(double growCoefficient) {
 
     if ((tmp == NULL) && (growCoefficient == 1)) {
         transaction(EndFailure);
-        VERIFY_STACK;
+        VALIDATE_STACK;
         return;
     }
 
     if (tmp == NULL) {
         if (growCoefficient == growCoefficientDefault) {
             transaction(EndSuccess);
-            VERIFY_STACK;
+            VALIDATE_STACK;
             grow(growCoefficientIfFailure);
         } else {
             transaction(EndSuccess);
-            VERIFY_STACK;
+            VALIDATE_STACK;
             grow(1);
         }
     }
@@ -321,12 +321,12 @@ void Stack<T>::grow(double growCoefficient) {
 
     transaction(EndSuccess);
 
-    VERIFY_STACK;
+    VALIDATE_STACK;
 }
 
 template<typename T>
 void Stack<T>::push(T val) {
-    VERIFY_STACK;
+    VALIDATE_STACK;
 
     transaction(Begin);
 
@@ -335,21 +335,21 @@ void Stack<T>::push(T val) {
         evalHashSum();
 
         transaction(EndSuccess);
-        VERIFY_STACK;
+        VALIDATE_STACK;
         return;
     }
 
     transaction(EndSuccess);
     grow(growCoefficientDefault);
 
-    VERIFY_STACK;
+    VALIDATE_STACK;
 
     push(val);
 }
 
 template<typename T>
 void Stack<T>::shrink() {
-    VERIFY_STACK;
+    VALIDATE_STACK;
 
     transaction(Begin);
 
@@ -357,7 +357,7 @@ void Stack<T>::shrink() {
 
     if ((size > shrinkedCapacity) || (shrinkedCapacity == 0)) {
         transaction(EndSuccess);
-        VERIFY_STACK;
+        VALIDATE_STACK;
         return;
     }
 
@@ -365,7 +365,7 @@ void Stack<T>::shrink() {
 
     if (tmp == NULL) {
         transaction(EndFailure);
-        VERIFY_STACK;
+        VALIDATE_STACK;
         return;
     }
 
@@ -374,19 +374,19 @@ void Stack<T>::shrink() {
     evalHashSum();
 
     transaction(EndSuccess);
-    VERIFY_STACK;
+    VALIDATE_STACK;
 }
 
 template<typename T>
 T Stack<T>::pop(bool *error) {
-    VERIFY_STACK;
+    VALIDATE_STACK;
 
     transaction(Begin);
 
     if (size == 0) {
         *error = true;
         transaction(EndFailure);
-        VERIFY_STACK;
+        VALIDATE_STACK;
         return T();
     }
 
@@ -396,14 +396,14 @@ T Stack<T>::pop(bool *error) {
 
     shrink();
 
-    VERIFY_STACK;
+    VALIDATE_STACK;
 
     return top;
 }
 
 template<typename T>
 void Stack<T>::shrinkToFit() {
-    VERIFY_STACK;
+    VALIDATE_STACK;
 
     transaction(Begin);
 
@@ -411,7 +411,7 @@ void Stack<T>::shrinkToFit() {
 
     if (tmp == NULL) {
         transaction(EndFailure);
-        VERIFY_STACK;
+        VALIDATE_STACK;
         return;
     }
 
@@ -421,18 +421,18 @@ void Stack<T>::shrinkToFit() {
 
     transaction(EndSuccess);
 
-    VERIFY_STACK;
+    VALIDATE_STACK;
 }
 
 template<typename T>
 void Stack<T>::print()
 {
-    VERIFY_STACK;
+    VALIDATE_STACK;
 
     StackError stackError = StackError{Ok, "Ok"};
     dump(&stackError);
 }
 
-#undef VERIFY_STACK
+#undef VALIDATE_STACK
 
 #endif /* STACK_HPP */

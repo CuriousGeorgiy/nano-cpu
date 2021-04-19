@@ -51,6 +51,10 @@ void Assembler::tokenizeLine(const Text::Line *line, char **label, char **cmd, c
     assert(cmd != nullptr);
     assert(arg != nullptr);
 
+    if (line->str[0] == ';') {
+        return;
+    }
+
     char *instruction = std::strtok(line->str, ";");
     *label = std::strtok(instruction, " ");
 
@@ -325,7 +329,7 @@ void Assembler::pass(unsigned passNo)
             continue;
         }
 
-        std::fprintf(listingFile, "%03lld ", translator - assembly);
+        std::fprintf(listingFile, "0x%08llX ", translator - assembly);
 
 #define DEFINE_COMMAND(name, code, noArg, processorSrc)             \
         {                                                           \

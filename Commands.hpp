@@ -56,7 +56,8 @@ do {                        \
 #define READ_WRITE_MODE_CONSTANT readWriteMode.constant
 
 #define WRITE_VALUE_TO_RAM(address, value) ram[(address)] = (value)
-#define READ_FROM_RAM(index) ram[(index)]
+#define READ_VALUE_FROM_RAM(index) ram[(index)]
+#define READ_CHAR_FROM_RAM(index) (char) ram[(index)]
 
 #define READ_CONSTANT() \
 [this]()   \
@@ -106,11 +107,12 @@ do {                        \
 
 DEFINE_COMMAND(hlt, 0, true,
 {
-    for (size_t i = 0; i < 50; ++i) {
-        for (size_t j = 0; j < 50; ++j) putchar((char) ram[i * 50 + j]);
-        putchar('\n');
-    }
-
+    /*
+     * for (size_t i = 0; i < screenHeight; ++i) {
+     *      for (size_t j = 0; j < screenWidth; ++j) printf("%c  ", READ_CHAR_FROM_RAM(i * screenWidth + j));
+     *      putchar('\n');
+     *      }
+    */
     TERMINATE();
 })
 
@@ -140,13 +142,13 @@ DEFINE_COMMAND(push, 4, false,
         if (READ_WRITE_MODE_REGISTER & READ_WRITE_MODE_CONSTANT) {
             auto index = READ_INDEX_FROM_REGISTER();
             auto offset = READ_OFFSET();
-            DATA_STACK_PUSH(READ_FROM_RAM(index + offset));
+            DATA_STACK_PUSH(READ_VALUE_FROM_RAM(index + offset));
         } else if (READ_WRITE_MODE_REGISTER & !READ_WRITE_MODE_CONSTANT) {
             auto index = READ_INDEX_FROM_REGISTER();
-            DATA_STACK_PUSH(READ_FROM_RAM(index));
+            DATA_STACK_PUSH(READ_VALUE_FROM_RAM(index));
         } else if (READ_WRITE_MODE_CONSTANT & !READ_WRITE_MODE_REGISTER) {
             auto offset = READ_OFFSET();
-            DATA_STACK_PUSH(READ_FROM_RAM(offset));
+            DATA_STACK_PUSH(READ_VALUE_FROM_RAM(offset));
         }
 
         continue;
@@ -318,4 +320,10 @@ DEFINE_COMMAND(ret, 20, true,
 {
     auto returnAddress = CALL_STACK_POP();
     SET_ADDRESS(returnAddress);
+})
+
+DEFINE_COMMAND(sqrt, 21, true,
+{
+    auto constant = DATA_STACK_POP();
+    DATA_STACK_PUSH(sqrt(constant));
 })
